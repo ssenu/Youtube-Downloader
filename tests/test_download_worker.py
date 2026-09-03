@@ -1,6 +1,6 @@
 import os
 
-from app.download_worker import cleanup_partials, pick_final_path
+from app.download_worker import DownloadWorker, cleanup_partials, pick_final_path
 
 
 def test_pick_final_path_returns_last_existing(tmp_path):
@@ -54,3 +54,24 @@ def test_cleanup_ignores_missing_files(tmp_path):
 
     assert survivor.exists()
     assert list(tmp_path.iterdir()) == [survivor]
+
+
+def test_downloading_hook_records_filename_for_cleanup():
+    worker = DownloadWorker(
+        url="https://example.com/v",
+        out_dir="C:\\tmp",
+        filename="",
+        quality="1080p",
+        ffmpeg_path="C:\\ffmpeg.exe",
+    )
+
+    worker._on_progress(
+        {
+            "status": "downloading",
+            "filename": "C:\\tmp\\video.f137.mp4",
+            "downloaded_bytes": 10,
+            "total_bytes": 100,
+        }
+    )
+
+    assert "C:\\tmp\\video.f137.mp4" in worker._seen_paths

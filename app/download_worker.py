@@ -72,6 +72,10 @@ class DownloadWorker(QThread):
         state = d.get("status")
 
         if state == "downloading":
+            path = d.get("filename")
+            if path and path not in self._seen_paths:
+                self._seen_paths.append(path)
+
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             done = d.get("downloaded_bytes") or 0
             if total:
