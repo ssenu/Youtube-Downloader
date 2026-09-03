@@ -828,7 +828,13 @@ def test_cleanup_removes_partials_and_originals(tmp_path):
 
 
 def test_cleanup_ignores_missing_files(tmp_path):
+    survivor = tmp_path / "무관한파일.mp4"
+    survivor.write_text("")
+
     cleanup_partials([str(tmp_path / "없음.mp4")])
+
+    assert survivor.exists()
+    assert list(tmp_path.iterdir()) == [survivor]
 ```
 
 - [ ] **Step 2: 테스트 실패 확인**
