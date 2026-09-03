@@ -1,9 +1,14 @@
+import os
+
 import pytest
 
 from app.options import (
     DEFAULT_QUALITY,
     QUALITY_FORMATS,
+    TITLE_TEMPLATE,
     build_format_string,
+    build_ydl_opts,
+    resolve_collision,
     sanitize_filename,
 )
 
@@ -40,3 +45,88 @@ def test_build_format_string_returns_mapped_value():
 def test_build_format_string_rejects_unknown_quality():
     with pytest.raises(ValueError):
         build_format_string("1440p")
+
+
+def test_resolve_collision_returns_stem_when_free(tmp_path):
+    assert resolve_collision(str(tmp_path), "강의") == "강의"
+
+
+def test_resolve_collision_appends_counter(tmp_path):
+    (tmp_path / "강의.mp4").write_text("")
+    assert resolve_collision(str(tmp_path), "강의") == "강의 (1)"
+
+    (tmp_path / "강의 (1).mkv").write_text("")
+    assert resolve_collision(str(tmp_path), "강의") == "강의 (2)"
+
+
+def test_resolve_collision_ignores_extension(tmp_path):
+    (tmp_path / "강의.webm").write_text("")
+    assert resolve_collision(str(tmp_path), "강의") == "강의 (1)"
+
+
+def test_build_opts_uses_given_filename(tmp_path):
+    opts = build_ydl_opts(
+        out_dir=str(tmp_path),
+        filename="웹프로그래밍(09/03)",
+        quality="1080p",
+        ffmpeg_path=r"C:\ffmpeg.exe",
+    )
+    assert opts["outtmpl"] == os.path.join(str(tmp_path), "웹프로그래밍(0903).%(ext)s")
+
+
+def test_build_opts_falls_back_to_title_template(tmp_path):
+    opts = build_ydl_opts(
+        out_dir=str(tmp_path),
+        filename="",
+        quality="1080p",
+        ffmpeg_path=r"C:\ffmpeg.exe",
+    )
+    assert opts["outtmpl"] == os.path.join(str(tmp_path), TITLE_TEMPLATE)
+
+
+def test_build_opts_falls_back_when_sanitizing_empties_the_name(tmp_path):
+    opts = build_ydl_opts(
+        out_dir=str(tmp_path),
+        filename="///",
+        quality="1080p",
+        ffmpeg_path=r"C:\ffmpeg.exe",
+    )
+    assert opts["outtmpl"] == os.path.join(str(tmp_path), TITLE_TEMPLATE)
+
+
+def test_build_opts_fixed_options(tmp_path):
+    opts = build_ydl_opts(
+        out_dir=str(tmp_path),
+        filename="a",
+        quality="480p",
+        ffmpeg_path=r"C:\ffmpeg.exe",
+    )
+    assert opts["merge_output_format"] == "mp4"
+    assert opts["ffmpeg_location"] == r"C:\ffmpeg.exe"
+    assert opts["noplaylist"] is True
+    assert opts["format"] == QUALITY_FORMATS["480p"]
+
+
+def test_build_opts_registers_hooks_only_when_given(tmp_path):
+    def hook(d):
+        return None
+
+    with_hooks = build_ydl_opts(
+        out_dir=str(tmp_path),
+        filename="a",
+        quality="1080p",
+        ffmpeg_path=r"C:\ffmpeg.exe",
+        progress_hook=hook,
+        postprocessor_hook=hook,
+    )
+    assert with_hooks["progress_hooks"] == [hook]
+    assert with_hooks["postprocessor_hooks"] == [hook]
+
+    without = build_ydl_opts(
+        out_dir=str(tmp_path),
+        filename="a",
+        quality="1080p",
+        ffmpeg_path=r"C:\ffmpeg.exe",
+    )
+    assert "progress_hooks" not in without
+    assert "postprocessor_hooks" not in without
