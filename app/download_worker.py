@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import glob
 import os
+import time
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -31,16 +33,37 @@ def cleanup_partials(paths: list[str]) -> None:
 
     훅이 알려준 경로만 건드린다. 저장 폴더를 확장자로 훑어 지우면
     다른 프로그램이 만든 파일까지 지울 위험이 있다.
+
+    DASH/HLS로 조각 다운로드된 스트림은 `video.mp4.part` 외에도
+    `video.mp4.part-Frag2.part` 같은 조각별 임시 파일을 남기므로
+    `path.part`로 시작하는 파일은 glob으로 함께 찾아 지운다.
     """
     for path in paths:
         if not path:
             continue
-        for junk in (path + ".part", path + ".ytdl", path):
-            if os.path.isfile(junk):
-                try:
-                    os.remove(junk)
-                except OSError:
-                    pass
+        junk_files = [path + ".part", path + ".ytdl", path]
+        junk_files.extend(glob.glob(glob.escape(path + ".part") + "*"))
+        for junk in junk_files:
+            _remove_with_retry(junk)
+
+
+def _remove_with_retry(path: str, attempts: int = 10, delay: float = 0.1) -> None:
+    """다운로드 스레드가 파일 핸들을 놓기 전이면 삭제가 실패할 수 있다.
+
+    특히 윈도우에서는 조각(fragment) 다운로드를 취소한 직후 핸들이
+    바로 풀리지 않는 경우가 있었다 (Task 8 실제 취소 테스트에서 확인).
+    바로 지워지지 않으면 잠깐 대기했다가 다시 시도한다.
+    """
+    for attempt in range(attempts):
+        if not os.path.isfile(path):
+            return
+        try:
+            os.remove(path)
+            return
+        except OSError:
+            if attempt == attempts - 1:
+                return
+            time.sleep(delay)
 
 
 class DownloadWorker(QThread):
