@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import glob
 import os
 import time
@@ -127,6 +128,10 @@ class DownloadWorker(QThread):
             self._seen_paths.append(path)
 
     def run(self) -> None:
+        outcome: str | None = None
+        failure_text = ""
+        ydl = None
+
         try:
             from yt_dlp import YoutubeDL
 
@@ -144,18 +149,34 @@ class DownloadWorker(QThread):
                 ydl.download([self._url])
 
         except CancelledError:
-            cleanup_partials(self._seen_paths)
-            self.cancelled.emit()
-            return
+            outcome = "cancelled"
 
         except Exception as exc:
             # yt-dlp는 훅에서 던진 예외를 DownloadError로 감싸므로
             # 여기서 플래그를 한 번 더 확인해야 취소를 취소로 처리할 수 있다.
             if self._cancelled:
-                cleanup_partials(self._seen_paths)
-                self.cancelled.emit()
+                outcome = "cancelled"
             else:
-                self.failed.emit(friendly_error(exc))
+                outcome = "failed"
+                failure_text = friendly_error(exc)
+
+        # 정리는 반드시 except 블록도, `ydl` 참조도 모두 사라진 뒤에 한다.
+        # 1) except 안에서는 예외 traceback이 yt-dlp 내부 프레임(및 그 프레임이
+        #    쥐고 있는 dest_stream 파일 핸들)을 계속 참조한다.
+        # 2) 그런데 traceback을 벗어나도 `with YoutubeDL(opts) as ydl:` 이 만든
+        #    지역변수 `ydl`은 run() 프레임에 그대로 남아 있고, YoutubeDL 인스턴스가
+        #    내부적으로 캐싱해 둔 다운로더(FragmentFD 등) 객체와 그 dest_stream을
+        #    통해 여전히 파일 핸들을 붙들고 있을 수 있다. 이 참조까지 끊어야
+        #    윈도우가 핸들을 실제로 닫는다.
+        del ydl
+        gc.collect()
+
+        if outcome == "cancelled":
+            cleanup_partials(self._seen_paths)
+            self.cancelled.emit()
+            return
+        if outcome == "failed":
+            self.failed.emit(failure_text)
             return
 
         final = pick_final_path(self._seen_paths)
