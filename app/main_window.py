@@ -1,4 +1,4 @@
-"""메인 창. 입력 수집과 시그널 배선만 담당한다."""
+"""메인 창. 입력을 캡처해 컨트롤러에 넘기고, 시그널로 목록을 갱신한다."""
 
 from __future__ import annotations
 
@@ -16,17 +16,22 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
-    QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from app.download_worker import DownloadWorker
 from app.ffmpeg_locator import FFmpegNotFoundError, locate_ffmpeg
 from app.options import DEFAULT_QUALITY, QUALITY_FORMATS
+from app.queue import JobStatus
+from app.queue_controller import QueueController
+from app.queue_panel import QueuePanel
 from app.resources import resource_path
 from app.validation import validate_out_dir, validate_url
+
+LEFT_WIDTH = 520
+RIGHT_WIDTH = 360
+GAP = 24
 
 
 def _field_label(text: str) -> QLabel:
@@ -41,24 +46,33 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("YouTube 다운로더")
         self.setWindowIcon(QIcon(resource_path("app.ico")))
 
-        self._worker: DownloadWorker | None = None
         self._closing = False
         self._ffmpeg_path: str | None = None
+        self._controller: QueueController | None = None
 
         self._build_ui()
         self._check_ffmpeg()
+        self._wire_controller()
+
+    # --- UI ---
 
     def _build_ui(self) -> None:
         central = QWidget()
         central.setObjectName("root")
-        outer = QVBoxLayout(central)
-        outer.setContentsMargins(28, 28, 28, 28)
-        outer.setSpacing(18)
+        columns = QHBoxLayout(central)
+        columns.setContentsMargins(28, 28, 28, 28)
+        columns.setSpacing(GAP)
 
-        # 헤더: 아이콘 + 제목
+        left = QWidget()
+        left.setFixedWidth(LEFT_WIDTH - 56)  # 기존 520 창의 좌우 여백 28을 뺀 내용 폭 464
+        left_col = QVBoxLayout(left)
+        left_col.setContentsMargins(0, 0, 0, 0)
+        left_col.setSpacing(18)
+
+        # 헤더: 아이콘 + 제목 + by ssenu
         header = QHBoxLayout()
-        header.setContentsMargins(0, 0, 0, 22 - 18)  # 아래 spacing(18)과 합쳐 22가 되도록 보정
-        header.setSpacing(12)
+        header.setContentsMargins(0, 0, 0, 22 - 18)
+        header.setSpacing(8)  # 제목-바이라인 8px. 아이콘-제목은 아래 addSpacing(4)로 12px
         icon_label = QLabel()
         icon_label.setPixmap(
             QPixmap(resource_path("app.ico")).scaled(
@@ -70,10 +84,17 @@ class MainWindow(QMainWindow):
         )
         title_label = QLabel("YouTube 다운로더")
         title_label.setObjectName("appTitle")
+        self.byline_label = QLabel("by ssenu")
+        self.byline_label.setObjectName("byline")
+        self.byline_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom
+        )
         header.addWidget(icon_label)
+        header.addSpacing(4)
         header.addWidget(title_label)
+        header.addWidget(self.byline_label, 0, Qt.AlignmentFlag.AlignBottom)
         header.addStretch(1)
-        outer.addLayout(header)
+        left_col.addLayout(header)
 
         # 영상 주소 (히어로)
         url_group = QVBoxLayout()
@@ -82,8 +103,9 @@ class MainWindow(QMainWindow):
         self.url_edit = QLineEdit()
         self.url_edit.setObjectName("urlEdit")
         self.url_edit.setPlaceholderText("https://www.youtube.com/watch?v=...")
+        self.url_edit.returnPressed.connect(self._enqueue)
         url_group.addWidget(self.url_edit)
-        outer.addLayout(url_group)
+        left_col.addLayout(url_group)
 
         # 파일 이름 / 화질
         name_quality_row = QHBoxLayout()
@@ -107,7 +129,7 @@ class MainWindow(QMainWindow):
 
         name_quality_row.addLayout(name_group, 1)
         name_quality_row.addLayout(quality_group, 0)
-        outer.addLayout(name_quality_row)
+        left_col.addLayout(name_quality_row)
 
         # 저장 위치
         dir_group = QVBoxLayout()
@@ -129,44 +151,35 @@ class MainWindow(QMainWindow):
         dir_row.addWidget(self.dir_edit, 1)
         dir_row.addWidget(self.browse_btn, 0)
         dir_group.addLayout(dir_row)
-        outer.addLayout(dir_group)
+        left_col.addLayout(dir_group)
 
-        # 액션 블록: 버튼 + 진행률 + 상태/퍼센트가 하나의 시그니처 블록
+        # 액션 블록: 버튼 + 요약 한 줄
         action_block = QVBoxLayout()
-        action_block.setContentsMargins(0, 26 - 18, 0, 0)  # 위 spacing(18)과 합쳐 26이 되도록 보정
+        action_block.setContentsMargins(0, 26 - 18, 0, 0)
         action_block.setSpacing(10)
-
         self.action_btn = QPushButton("추출")
         self.action_btn.setObjectName("actionBtn")
-        self.action_btn.clicked.connect(self._on_action)
+        self.action_btn.clicked.connect(self._enqueue)
         action_block.addWidget(self.action_btn)
+        self.summary_label = QLabel("대기 0 · 추출 중 0 · 완료 0")
+        self.summary_label.setObjectName("summaryLabel")
+        action_block.addWidget(self.summary_label)
+        left_col.addLayout(action_block)
+        left_col.addStretch(1)
 
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
-        self.progress.setValue(0)
-        self.progress.setTextVisible(False)
-        action_block.addWidget(self.progress)
+        # 오른쪽: 추출 목록
+        self.queue_panel = QueuePanel()
+        self.queue_panel.setFixedWidth(RIGHT_WIDTH)
+        self.queue_panel.cancel_requested.connect(self._on_cancel_requested)
+        self.queue_panel.reveal_requested.connect(self._on_reveal_requested)
 
-        status_row = QHBoxLayout()
-        status_row.setContentsMargins(0, 0, 0, 0)
-        self.status_label = QLabel("대기 중")
-        self.status_label.setObjectName("statusLabel")
-        self.percent_label = QLabel("0%")
-        self.percent_label.setObjectName("percentLabel")
-        self.percent_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
-        status_row.addWidget(self.status_label, 1)
-        status_row.addWidget(self.percent_label, 0)
-        action_block.addLayout(status_row)
-
-        outer.addLayout(action_block)
-
+        columns.addWidget(left, 0)
+        columns.addWidget(self.queue_panel, 0)
         self.setCentralWidget(central)
 
-        self.setFixedWidth(520)
+        self.setFixedWidth(LEFT_WIDTH + GAP + RIGHT_WIDTH)
         self.adjustSize()
-        self.setFixedHeight(self.sizeHint().height())
+        self.setFixedHeight(max(self.sizeHint().height(), 456))
 
     def _check_ffmpeg(self) -> None:
         try:
@@ -174,8 +187,18 @@ class MainWindow(QMainWindow):
         except FFmpegNotFoundError as exc:
             self._ffmpeg_path = None
             self.action_btn.setEnabled(False)
-            self.status_label.setText("ffmpeg 없음")
+            self.summary_label.setText("ffmpeg 없음")
             QMessageBox.critical(self, "ffmpeg을 찾을 수 없습니다", str(exc))
+
+    def _wire_controller(self) -> None:
+        self._controller = QueueController(self._ffmpeg_path, parent=self)
+        self._controller.job_added.connect(self._on_job_added)
+        self._controller.job_changed.connect(self._on_job_changed)
+        self._controller.job_removed.connect(self.queue_panel.remove_row)
+        self._controller.summary_changed.connect(self.summary_label.setText)
+        self._controller.idle.connect(self._on_controller_idle)
+
+    # --- 사용자 동작 ---
 
     def _choose_dir(self) -> None:
         chosen = QFileDialog.getExistingDirectory(
@@ -184,15 +207,9 @@ class MainWindow(QMainWindow):
         if chosen:
             self.dir_edit.setText(QDir.toNativeSeparators(chosen))
 
-    def _on_action(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
-            self.status_label.setText("취소 중…")
-            self.action_btn.setEnabled(False)
-            self._worker.cancel()
+    def _enqueue(self) -> None:
+        if self._controller is None or not self.action_btn.isEnabled():
             return
-        self._start()
-
-    def _start(self) -> None:
         url = self.url_edit.text().strip()
         out_dir = self.dir_edit.text().strip()
 
@@ -201,80 +218,48 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "입력을 확인해 주세요", message)
                 return
 
-        # 지역 변수로 두면 가비지 컬렉션되어 스레드가 죽는다. 반드시 보관한다.
-        self._worker = DownloadWorker(
+        self._controller.enqueue(
             url=url,
             out_dir=out_dir,
             filename=self.name_edit.text().strip(),
             quality=self.quality_box.currentText(),
-            ffmpeg_path=self._ffmpeg_path,
         )
-        self._worker.progress.connect(self._on_progress)
-        self._worker.status.connect(self.status_label.setText)
-        self._worker.finished_ok.connect(self._on_finished)
-        self._worker.failed.connect(self._on_failed)
-        self._worker.cancelled.connect(self._on_cancelled)
-        self._worker.finished.connect(self._on_thread_finished)
+        # 다음 주소를 바로 붙여넣을 수 있게 비운다. 화질·저장 위치는 그대로 둔다.
+        self.url_edit.clear()
+        self.name_edit.clear()
+        self.url_edit.setFocus()
 
-        self.progress.setValue(0)
-        self.percent_label.setText("0%")
-        self._set_running(True)
-        self._worker.start()
+    def _on_cancel_requested(self, job_id: int) -> None:
+        if self._controller is not None:
+            self._controller.cancel_or_remove(job_id)
 
-    def _on_progress(self, value: int) -> None:
-        self.progress.setValue(value)
-        self.percent_label.setText(f"{value}%")
-
-    def _set_running(self, running: bool) -> None:
-        if self._closing:
-            return  # 종료 대기 중에는 어떤 입력도 다시 활성화하지 않는다
-        for widget in (
-            self.url_edit,
-            self.name_edit,
-            self.quality_box,
-            self.dir_edit,
-            self.browse_btn,
-        ):
-            widget.setEnabled(not running)
-
-        self.action_btn.setEnabled(True)
-        self.action_btn.setText("취소" if running else "추출")
-        self.action_btn.setProperty("mode", "cancel" if running else "")
-        self.action_btn.style().unpolish(self.action_btn)
-        self.action_btn.style().polish(self.action_btn)
-
-    def _on_finished(self, path: str) -> None:
-        if self._closing:
+    def _on_reveal_requested(self, job_id: int) -> None:
+        if self._controller is None:
             return
-        self._set_running(False)
-        self.status_label.setText("완료")
-
-        box = QMessageBox(self)
-        box.setWindowTitle("완료")
-        box.setText(f"저장했습니다.\n\n{path}")
-        open_btn = box.addButton("폴더 열기", QMessageBox.ButtonRole.ActionRole)
-        box.addButton("닫기", QMessageBox.ButtonRole.RejectRole)
-        box.exec()
-
-        if box.clickedButton() is open_btn:
-            self._reveal(path)
-
-    def _on_failed(self, message: str) -> None:
-        if self._closing:
+        try:
+            job = self._controller.job(job_id)
+        except KeyError:
             return
-        self._set_running(False)
-        self.progress.setValue(0)
-        self.percent_label.setText("0%")
-        self.status_label.setText("실패")
-        QMessageBox.critical(self, "다운로드 실패", message)
+        if job.status is JobStatus.DONE and job.result_path:
+            self._reveal(job.result_path)
 
-    def _on_cancelled(self) -> None:
-        if self._closing:
+    # --- 컨트롤러 → 패널 ---
+
+    def _on_job_added(self, job_id: int) -> None:
+        self.queue_panel.add_row(self._controller.job(job_id))
+
+    def _on_job_changed(self, job_id: int) -> None:
+        try:
+            job = self._controller.job(job_id)
+        except KeyError:
             return
-        self._set_running(False)
-        self.progress.setValue(0)
-        self.percent_label.setText("0%")
-        self.status_label.setText("취소됨")
+        self.queue_panel.update_row(job)
+
+    def _on_controller_idle(self) -> None:
+        if self._closing:
+            self.close()
+
+    # --- 기타 ---
 
     @staticmethod
     def _reveal(path: str) -> None:
@@ -286,23 +271,15 @@ class MainWindow(QMainWindow):
         else:
             subprocess.Popen(["xdg-open", os.path.dirname(target)])
 
-    def _on_thread_finished(self) -> None:
-        """QThread가 완전히 끝난 뒤 호출된다. 종료를 기다리고 있었다면 이제 닫는다."""
-        if self._closing and self._worker is not None:
-            # finished는 스레드가 끝나기 직전에 발화할 수 있으므로 isRunning()이
-            # 확실히 False가 되도록 잠깐 기다린다. 이미 끝났으면 즉시 반환한다.
-            self._worker.wait()
-            self.close()
-
     def closeEvent(self, event):
-        if self._worker is not None and self._worker.isRunning():
+        if self._controller is not None and self._controller.is_busy():
             # 실행 중인 QThread를 파괴하면 종료 시 크래시가 난다.
-            # 취소를 요청하고 이벤트를 무시한 뒤, _on_thread_finished가 다시 close()를 부른다.
+            # 대기는 비우고 실행 중은 취소한 뒤, 컨트롤러가 idle을 보내면 다시 close()한다.
             if not self._closing:
                 self._closing = True
-                self.status_label.setText("종료 중… (다운로드 취소)")
+                self.summary_label.setText("종료 중… (다운로드 취소)")
                 self.action_btn.setEnabled(False)
-                self._worker.cancel()
+                self._controller.cancel_all()
             event.ignore()
             return
         super().closeEvent(event)
