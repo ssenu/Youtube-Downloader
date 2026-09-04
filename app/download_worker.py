@@ -70,6 +70,7 @@ def _remove_with_retry(path: str, attempts: int = 10, delay: float = 0.1) -> Non
 class DownloadWorker(QThread):
     progress = pyqtSignal(int)
     status = pyqtSignal(str)
+    title_resolved = pyqtSignal(str)
     finished_ok = pyqtSignal(str)
     failed = pyqtSignal(str)
     cancelled = pyqtSignal()
@@ -88,6 +89,28 @@ class DownloadWorker(QThread):
     def cancel(self) -> None:
         """취소를 요청한다. 훅이 다음에 호출될 때 반영된다."""
         self._cancelled = True
+
+    def _probe_title(self) -> str:
+        """파일명을 비웠을 때 제목을 먼저 알아낸다.
+
+        그냥 %(title)s 템플릿을 넘기면 yt-dlp가 기존 파일을 발견했을 때
+        다운로드를 건너뛰고 그 파일을 결과로 돌려주므로 '완료'가 거짓이 된다.
+        알아낸 제목은 title_resolved로 UI에 알린다.
+        """
+        from yt_dlp import YoutubeDL
+
+        probe_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "skip_download": True,
+        }
+        with YoutubeDL(probe_opts) as probe:
+            info = probe.extract_info(self._url, download=False)
+        title = (info or {}).get("title") or ""
+        if title:
+            self.title_resolved.emit(title)
+        return title
 
     def _on_progress(self, d: dict) -> None:
         if self._cancelled:
@@ -137,20 +160,8 @@ class DownloadWorker(QThread):
 
             filename = self._filename
             if not filename.strip():
-                # 파일명을 비워두면 제목을 먼저 알아내야 충돌 검사를 할 수 있다.
-                # 그냥 %(title)s 템플릿을 넘기면 yt-dlp가 기존 파일을 발견했을 때
-                # 다운로드를 건너뛰고 그 파일을 결과로 돌려주므로 '완료'가 거짓이 된다.
                 self.status.emit("영상 정보 확인 중…")
-                probe_opts = {
-                    "quiet": True,
-                    "no_warnings": True,
-                    "noplaylist": True,
-                    "skip_download": True,
-                }
-                with YoutubeDL(probe_opts) as probe:
-                    info = probe.extract_info(self._url, download=False)
-                filename = (info or {}).get("title") or ""
-                info = None
+                filename = self._probe_title()
 
             opts = build_ydl_opts(
                 out_dir=self._out_dir,

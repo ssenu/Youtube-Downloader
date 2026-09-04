@@ -139,3 +139,68 @@ def test_downloading_hook_records_filename_for_cleanup():
     )
 
     assert "C:\\tmp\\video.f137.mp4" in worker._seen_paths
+
+
+def test_probe_title_emits_title_resolved(monkeypatch):
+    import yt_dlp
+
+    class FakeYDL:
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def extract_info(self, url, download=False):
+            assert download is False
+            return {"title": "웹프로그래밍(09/03)"}
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+
+    worker = DownloadWorker(
+        url="https://example.com/v",
+        out_dir="C:\\tmp",
+        filename="",
+        quality="1080p",
+        ffmpeg_path="C:\\ffmpeg.exe",
+    )
+    got: list[str] = []
+    worker.title_resolved.connect(got.append)
+
+    assert worker._probe_title() == "웹프로그래밍(09/03)"
+    assert got == ["웹프로그래밍(09/03)"]
+
+
+def test_probe_title_returns_empty_and_does_not_emit_without_title(monkeypatch):
+    import yt_dlp
+
+    class FakeYDL:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def extract_info(self, url, download=False):
+            return {}
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+
+    worker = DownloadWorker(
+        url="https://example.com/v",
+        out_dir="C:\\tmp",
+        filename="",
+        quality="1080p",
+        ffmpeg_path="C:\\ffmpeg.exe",
+    )
+    got: list[str] = []
+    worker.title_resolved.connect(got.append)
+
+    assert worker._probe_title() == ""
+    assert got == []
