@@ -14,8 +14,6 @@ QLabel#appTitle {
     font-size: 17px; font-weight: 600;
 }
 QLabel[role="field"] { color: #6B6B70; font-size: 12px; }
-QLabel#statusLabel { color: #6B6B70; font-size: 12px; }
-QLabel#percentLabel { color: #1A1A1B; font-size: 12px; font-weight: 600; }
 
 QLineEdit, QComboBox {
     background: #FFFFFF; color: #1A1A1B;
@@ -53,8 +51,6 @@ QPushButton#actionBtn {
 QPushButton#actionBtn:hover { background: #C42C1D; }
 QPushButton#actionBtn:pressed { background: #B0281A; }
 QPushButton#actionBtn:disabled { background: #E8A39B; color: #FFFFFF; }
-QProgressBar { background: #E4E4E7; border: none; border-radius: 2px; min-height: 4px; max-height: 4px; }
-QProgressBar::chunk { background: #D03020; border-radius: 2px; }
 
 QLabel#byline { color: #6B6B70; font-size: 12px; }
 QLabel#summaryLabel { color: #6B6B70; font-size: 12px; }

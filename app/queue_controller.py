@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from app.download_worker import DownloadWorker
 from app.queue import DownloadQueue, Job, JobStatus
@@ -17,6 +17,7 @@ class QueueController(QObject):
 
     # 테스트에서 가짜 워커로 바꾼다.
     worker_factory = DownloadWorker
+    inter_job_delay_ms = 3000
 
     def __init__(self, ffmpeg_path: str | None, parent=None) -> None:
         super().__init__(parent)
@@ -87,27 +88,42 @@ class QueueController(QObject):
             self.idle.emit()
             return
 
-        worker = self.worker_factory(
-            url=job.url,
-            out_dir=job.out_dir,
-            filename=job.filename,
-            quality=job.quality,
-            ffmpeg_path=self._ffmpeg_path,
-        )
-        self._worker = worker
-        self._active_id = job.id
+        try:
+            worker = self.worker_factory(
+                url=job.url,
+                out_dir=job.out_dir,
+                filename=job.filename,
+                quality=job.quality,
+                ffmpeg_path=self._ffmpeg_path,
+            )
+            worker.progress.connect(self._on_progress)
+            worker.title_resolved.connect(self._on_title)
+            worker.finished_ok.connect(self._on_finished_ok)
+            worker.failed.connect(self._on_failed)
+            worker.cancelled.connect(self._on_cancelled)
+            worker.finished.connect(self._on_thread_finished)
 
-        worker.progress.connect(self._on_progress)
-        worker.title_resolved.connect(self._on_title)
-        worker.finished_ok.connect(self._on_finished_ok)
-        worker.failed.connect(self._on_failed)
-        worker.cancelled.connect(self._on_cancelled)
-        worker.finished.connect(self._on_thread_finished)
+            self._queue.mark_running(job.id)
+            self._worker = worker
+            self._active_id = job.id
+            # UI 슬롯(job_changed 등)이 예외를 던져도 스레드는 이미 떠 있도록
+            # 알리기 전에 먼저 시작한다.
+            worker.start()
+        except Exception as exc:  # 워커 생성/시작 실패는 그 작업만 실패로 마감하고 다음으로 간다
+            self._worker = None
+            self._active_id = None
+            job_now = self._queue.get(job.id)
+            if job_now is not None:
+                if job_now.status is JobStatus.PENDING:
+                    self._queue.mark_running(job.id)
+                self._queue.mark_failed(job.id, f"작업을 시작하지 못했습니다.\n\n{exc}")
+                self.job_changed.emit(job.id)
+            self._emit_summary()
+            self._start_next()
+            return
 
-        self._queue.mark_running(job.id)
         self.job_changed.emit(job.id)
         self._emit_summary()
-        worker.start()
 
     def _on_progress(self, value: int) -> None:
         if self._active_id is None:
@@ -156,7 +172,11 @@ class QueueController(QObject):
                 self._emit_summary()
         self._worker = None
         self._active_id = None
-        self._start_next()
+        if self.inter_job_delay_ms > 0 and self._queue.next_pending() is not None:
+            # 연속 요청은 유튜브 봇 확인을 유발하기 쉬우므로 작업 사이에 잠깐 쉰다.
+            QTimer.singleShot(self.inter_job_delay_ms, self._start_next)
+        else:
+            self._start_next()
 
     def _emit_summary(self) -> None:
         self.summary_changed.emit(self._queue.summary())

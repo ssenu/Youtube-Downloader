@@ -195,7 +195,7 @@ class MainWindow(QMainWindow):
         self._controller.job_added.connect(self._on_job_added)
         self._controller.job_changed.connect(self._on_job_changed)
         self._controller.job_removed.connect(self.queue_panel.remove_row)
-        self._controller.summary_changed.connect(self.summary_label.setText)
+        self._controller.summary_changed.connect(self._on_summary_changed)
         self._controller.idle.connect(self._on_controller_idle)
 
     # --- 사용자 동작 ---
@@ -258,6 +258,11 @@ class MainWindow(QMainWindow):
     def _on_controller_idle(self) -> None:
         if self._closing:
             self.close()
+
+    def _on_summary_changed(self, text: str) -> None:
+        if self._closing:
+            return  # 종료 안내 문구를 덮어쓰지 않는다
+        self.summary_label.setText(text)
 
     # --- 기타 ---
 

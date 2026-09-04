@@ -76,13 +76,15 @@ def build_ydl_opts(
     ffmpeg_path: str,
     progress_hook=None,
     postprocessor_hook=None,
+    match_filter=None,
 ) -> dict:
     """UI 입력을 yt-dlp 옵션 딕셔너리로 만든다."""
     stem = sanitize_filename(filename or "")
 
     if stem:
         stem = resolve_collision(out_dir, stem)
-        outtmpl = os.path.join(out_dir, stem + ".%(ext)s")
+        # yt-dlp는 outtmpl을 %-템플릿으로 해석하므로 사용자 파일명의 %는 %%로 이스케이프한다.
+        outtmpl = os.path.join(out_dir, stem.replace("%", "%%") + ".%(ext)s")
     else:
         # 파일명을 비우면 영상 제목을 쓴다. 제목은 미리 알 수 없으므로
         # 충돌 검사를 건너뛰고 yt-dlp 기본 동작에 맡긴다.
@@ -103,5 +105,7 @@ def build_ydl_opts(
         opts["progress_hooks"] = [progress_hook]
     if postprocessor_hook is not None:
         opts["postprocessor_hooks"] = [postprocessor_hook]
+    if match_filter is not None:
+        opts["match_filter"] = match_filter
 
     return opts

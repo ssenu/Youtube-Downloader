@@ -138,6 +138,12 @@ class DownloadWorker(QThread):
             self._stream_index += 1
             self.progress.emit(100)
 
+    def _match_filter(self, info: dict, *, incomplete: bool = False):
+        """yt-dlp가 정보 추출을 마친 직후, 다운로드 전에 호출된다. 취소 확인 지점."""
+        if self._cancelled:
+            raise CancelledError()
+        return None
+
     def _on_postprocessor(self, d: dict) -> None:
         if self._cancelled:
             raise CancelledError()
@@ -162,6 +168,8 @@ class DownloadWorker(QThread):
             if not filename.strip():
                 self.status.emit("영상 정보 확인 중…")
                 filename = self._probe_title()
+                if self._cancelled:
+                    raise CancelledError()
 
             opts = build_ydl_opts(
                 out_dir=self._out_dir,
@@ -170,6 +178,7 @@ class DownloadWorker(QThread):
                 ffmpeg_path=self._ffmpeg_path,
                 progress_hook=self._on_progress,
                 postprocessor_hook=self._on_postprocessor,
+                match_filter=self._match_filter,
             )
 
             self.status.emit("영상 정보 확인 중…")
