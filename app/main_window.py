@@ -141,12 +141,15 @@ class MainWindow(QMainWindow):
         self._worker.finished_ok.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
         self._worker.cancelled.connect(self._on_cancelled)
+        self._worker.finished.connect(self._on_thread_finished)
 
         self.progress.setValue(0)
         self._set_running(True)
         self._worker.start()
 
     def _set_running(self, running: bool) -> None:
+        if self._closing:
+            return  # 종료 대기 중에는 어떤 입력도 다시 활성화하지 않는다
         for widget in (
             self.url_edit,
             self.name_edit,
@@ -160,6 +163,8 @@ class MainWindow(QMainWindow):
         self.action_btn.setText("취소" if running else "추출")
 
     def _on_finished(self, path: str) -> None:
+        if self._closing:
+            return
         self._set_running(False)
         self.status_label.setText("완료")
 
@@ -174,12 +179,16 @@ class MainWindow(QMainWindow):
             self._reveal(path)
 
     def _on_failed(self, message: str) -> None:
+        if self._closing:
+            return
         self._set_running(False)
         self.progress.setValue(0)
         self.status_label.setText("실패")
         QMessageBox.critical(self, "다운로드 실패", message)
 
     def _on_cancelled(self) -> None:
+        if self._closing:
+            return
         self._set_running(False)
         self.progress.setValue(0)
         self.status_label.setText("취소됨")
@@ -194,16 +203,23 @@ class MainWindow(QMainWindow):
         else:
             subprocess.Popen(["xdg-open", os.path.dirname(target)])
 
+    def _on_thread_finished(self) -> None:
+        """QThread가 완전히 끝난 뒤 호출된다. 종료를 기다리고 있었다면 이제 닫는다."""
+        if self._closing and self._worker is not None:
+            # finished는 스레드가 끝나기 직전에 발화할 수 있으므로 isRunning()이
+            # 확실히 False가 되도록 잠깐 기다린다. 이미 끝났으면 즉시 반환한다.
+            self._worker.wait()
+            self.close()
+
     def closeEvent(self, event):
         if self._worker is not None and self._worker.isRunning():
             # 실행 중인 QThread를 파괴하면 종료 시 크래시가 난다.
-            # 취소를 요청하고, 스레드가 완전히 끝난 뒤 다시 close()를 부른다.
+            # 취소를 요청하고 이벤트를 무시한 뒤, _on_thread_finished가 다시 close()를 부른다.
             if not self._closing:
                 self._closing = True
                 self.status_label.setText("종료 중… (다운로드 취소)")
                 self.action_btn.setEnabled(False)
                 self._worker.cancel()
-                self._worker.finished.connect(self.close)
             event.ignore()
             return
         super().closeEvent(event)
