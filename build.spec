@@ -7,7 +7,8 @@ import imageio_ffmpeg
 from PyInstaller.utils.hooks import collect_submodules
 
 # ffmpeg_locator가 번들 안에서 'ffmpeg.exe'를 찾으므로 그 이름으로 복사해 넣는다.
-_staged_ffmpeg = os.path.join(tempfile.gettempdir(), "ffmpeg.exe")
+_staged_dir = tempfile.mkdtemp(prefix="ytdl-build-")
+_staged_ffmpeg = os.path.join(_staged_dir, "ffmpeg.exe")
 shutil.copyfile(imageio_ffmpeg.get_ffmpeg_exe(), _staged_ffmpeg)
 
 a = Analysis(
