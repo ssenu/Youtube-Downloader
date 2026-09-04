@@ -64,6 +64,11 @@ def test_resolve_collision_ignores_extension(tmp_path):
     assert resolve_collision(str(tmp_path), "강의") == "강의 (1)"
 
 
+def test_resolve_collision_handles_glob_metacharacters(tmp_path):
+    (tmp_path / "[LIVE] 강의.mp4").write_text("")
+    assert resolve_collision(str(tmp_path), "[LIVE] 강의") == "[LIVE] 강의 (1)"
+
+
 def test_build_opts_uses_given_filename(tmp_path):
     opts = build_ydl_opts(
         out_dir=str(tmp_path),

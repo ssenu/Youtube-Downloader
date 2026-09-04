@@ -135,9 +135,26 @@ class DownloadWorker(QThread):
         try:
             from yt_dlp import YoutubeDL
 
+            filename = self._filename
+            if not filename.strip():
+                # 파일명을 비워두면 제목을 먼저 알아내야 충돌 검사를 할 수 있다.
+                # 그냥 %(title)s 템플릿을 넘기면 yt-dlp가 기존 파일을 발견했을 때
+                # 다운로드를 건너뛰고 그 파일을 결과로 돌려주므로 '완료'가 거짓이 된다.
+                self.status.emit("영상 정보 확인 중…")
+                probe_opts = {
+                    "quiet": True,
+                    "no_warnings": True,
+                    "noplaylist": True,
+                    "skip_download": True,
+                }
+                with YoutubeDL(probe_opts) as probe:
+                    info = probe.extract_info(self._url, download=False)
+                filename = (info or {}).get("title") or ""
+                info = None
+
             opts = build_ydl_opts(
                 out_dir=self._out_dir,
-                filename=self._filename,
+                filename=filename,
                 quality=self._quality,
                 ffmpeg_path=self._ffmpeg_path,
                 progress_hook=self._on_progress,
@@ -168,7 +185,7 @@ class DownloadWorker(QThread):
         #    내부적으로 캐싱해 둔 다운로더(FragmentFD 등) 객체와 그 dest_stream을
         #    통해 여전히 파일 핸들을 붙들고 있을 수 있다. 이 참조까지 끊어야
         #    윈도우가 핸들을 실제로 닫는다.
-        del ydl
+        ydl = None
         gc.collect()
 
         if outcome == "cancelled":

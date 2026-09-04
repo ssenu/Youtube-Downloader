@@ -9,6 +9,7 @@ _RULES: list[tuple[tuple[str, ...], str]] = [
     # yt-dlp 실제 문구는 "has not made this video available in your country"라서
     # "not available in your country"로 검사하면 매칭되지 않는다.
     (("available in your country", "geo restrict", "geo-restrict"), "지역 차단된 영상입니다."),
+    (("not a bot",), "유튜브가 일시적으로 확인을 요구하고 있습니다. 잠시 후 다시 시도해 주세요."),
     (("sign in to confirm your age", "age-restricted"), "연령 확인이 필요한 영상입니다."),
     (("sign in", "login required"), "로그인이 필요한 영상입니다."),
     (("unsupported url", "is not a valid url"), "지원하지 않는 URL입니다. 주소를 확인해 주세요."),

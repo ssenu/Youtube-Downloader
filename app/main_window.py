@@ -35,6 +35,7 @@ class MainWindow(QMainWindow):
         self.setMinimumWidth(580)
 
         self._worker: DownloadWorker | None = None
+        self._closing = False
         self._ffmpeg_path: str | None = None
 
         self._build_ui()
@@ -187,7 +188,7 @@ class MainWindow(QMainWindow):
     def _reveal(path: str) -> None:
         target = os.path.normpath(path)
         if sys.platform == "win32":
-            subprocess.Popen(["explorer", "/select,", target])
+            subprocess.Popen(f'explorer /select,"{target}"')
         elif sys.platform == "darwin":
             subprocess.Popen(["open", "-R", target])
         else:
@@ -195,6 +196,14 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         if self._worker is not None and self._worker.isRunning():
-            self._worker.cancel()
-            self._worker.wait(3000)
+            # 실행 중인 QThread를 파괴하면 종료 시 크래시가 난다.
+            # 취소를 요청하고, 스레드가 완전히 끝난 뒤 다시 close()를 부른다.
+            if not self._closing:
+                self._closing = True
+                self.status_label.setText("종료 중… (다운로드 취소)")
+                self.action_btn.setEnabled(False)
+                self._worker.cancel()
+                self._worker.finished.connect(self.close)
+            event.ignore()
+            return
         super().closeEvent(event)

@@ -29,3 +29,17 @@ def test_unknown_error_keeps_original_text():
     message = friendly_error(Exception(original))
     assert original in message
     assert "실패" in message
+
+
+def test_bot_check_is_not_reported_as_login():
+    message = friendly_error(Exception("ERROR: [youtube] abc: Sign in to confirm you're not a bot. Use --cookies-from-browser"))
+    assert "잠시 후" in message
+    assert "로그인" not in message
+
+
+def test_age_restricted():
+    assert "연령" in friendly_error(Exception("Sign in to confirm your age"))
+
+
+def test_ffmpeg_failure():
+    assert "ffmpeg" in friendly_error(Exception("ERROR: ffmpeg exited with code 1"))
