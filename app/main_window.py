@@ -6,11 +6,11 @@ import os
 import subprocess
 import sys
 
-from PyQt6.QtCore import QStandardPaths
+from PyQt6.QtCore import QStandardPaths, Qt
+from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -25,14 +25,21 @@ from PyQt6.QtWidgets import (
 from app.download_worker import DownloadWorker
 from app.ffmpeg_locator import FFmpegNotFoundError, locate_ffmpeg
 from app.options import DEFAULT_QUALITY, QUALITY_FORMATS
+from app.resources import resource_path
 from app.validation import validate_out_dir, validate_url
+
+
+def _field_label(text: str) -> QLabel:
+    label = QLabel(text)
+    label.setProperty("role", "field")
+    return label
 
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("YouTube 다운로더")
-        self.setMinimumWidth(580)
+        self.setWindowIcon(QIcon(resource_path("app.ico")))
 
         self._worker: DownloadWorker | None = None
         self._closing = False
@@ -43,57 +50,121 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         central = QWidget()
+        central.setObjectName("root")
         outer = QVBoxLayout(central)
-        outer.setContentsMargins(16, 16, 16, 16)
-        outer.setSpacing(12)
+        outer.setContentsMargins(28, 28, 28, 28)
+        outer.setSpacing(18)
 
-        form = QFormLayout()
+        # 헤더: 아이콘 + 제목
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 22 - 18)  # 아래 spacing(18)과 합쳐 22가 되도록 보정
+        header.setSpacing(12)
+        icon_label = QLabel()
+        icon_label.setPixmap(
+            QPixmap(resource_path("app.ico")).scaled(
+                28,
+                28,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        title_label = QLabel("YouTube 다운로더")
+        title_label.setObjectName("appTitle")
+        header.addWidget(icon_label)
+        header.addWidget(title_label)
+        header.addStretch(1)
+        outer.addLayout(header)
 
+        # 영상 주소 (히어로)
+        url_group = QVBoxLayout()
+        url_group.setSpacing(6)
+        url_group.addWidget(_field_label("영상 주소"))
         self.url_edit = QLineEdit()
+        self.url_edit.setObjectName("urlEdit")
         self.url_edit.setPlaceholderText("https://www.youtube.com/watch?v=...")
-        form.addRow("URL", self.url_edit)
+        url_group.addWidget(self.url_edit)
+        outer.addLayout(url_group)
 
+        # 파일 이름 / 화질
+        name_quality_row = QHBoxLayout()
+        name_quality_row.setSpacing(18)
+
+        name_group = QVBoxLayout()
+        name_group.setSpacing(6)
+        name_group.addWidget(_field_label("파일 이름"))
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("비워두면 영상 제목을 사용합니다")
-        form.addRow("파일명", self.name_edit)
+        self.name_edit.setPlaceholderText("비워두면 영상 제목을 사용")
+        name_group.addWidget(self.name_edit)
 
+        quality_group = QVBoxLayout()
+        quality_group.setSpacing(6)
+        quality_group.addWidget(_field_label("화질"))
         self.quality_box = QComboBox()
         self.quality_box.addItems(list(QUALITY_FORMATS))
         self.quality_box.setCurrentText(DEFAULT_QUALITY)
-        form.addRow("화질", self.quality_box)
+        self.quality_box.setFixedWidth(132)
+        quality_group.addWidget(self.quality_box)
 
+        name_quality_row.addLayout(name_group, 1)
+        name_quality_row.addLayout(quality_group, 0)
+        outer.addLayout(name_quality_row)
+
+        # 저장 위치
+        dir_group = QVBoxLayout()
+        dir_group.setSpacing(6)
+        dir_group.addWidget(_field_label("저장 위치"))
+        dir_row = QHBoxLayout()
+        dir_row.setContentsMargins(0, 0, 0, 0)
+        dir_row.setSpacing(8)
         self.dir_edit = QLineEdit(
             QStandardPaths.writableLocation(
                 QStandardPaths.StandardLocation.DesktopLocation
             )
         )
-        self.browse_btn = QPushButton("찾아보기…")
+        self.browse_btn = QPushButton("변경…")
+        self.browse_btn.setObjectName("browseBtn")
         self.browse_btn.clicked.connect(self._choose_dir)
+        dir_row.addWidget(self.dir_edit, 1)
+        dir_row.addWidget(self.browse_btn, 0)
+        dir_group.addLayout(dir_row)
+        outer.addLayout(dir_group)
 
-        dir_row = QHBoxLayout()
-        dir_row.setContentsMargins(0, 0, 0, 0)
-        dir_row.addWidget(self.dir_edit)
-        dir_row.addWidget(self.browse_btn)
-        dir_holder = QWidget()
-        dir_holder.setLayout(dir_row)
-        form.addRow("저장 위치", dir_holder)
-
-        outer.addLayout(form)
+        # 액션 블록: 버튼 + 진행률 + 상태/퍼센트가 하나의 시그니처 블록
+        action_block = QVBoxLayout()
+        action_block.setContentsMargins(0, 26 - 18, 0, 0)  # 위 spacing(18)과 합쳐 26이 되도록 보정
+        action_block.setSpacing(10)
 
         self.action_btn = QPushButton("추출")
-        self.action_btn.setMinimumHeight(36)
+        self.action_btn.setObjectName("actionBtn")
         self.action_btn.clicked.connect(self._on_action)
-        outer.addWidget(self.action_btn)
+        action_block.addWidget(self.action_btn)
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
-        outer.addWidget(self.progress)
+        self.progress.setTextVisible(False)
+        action_block.addWidget(self.progress)
 
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
         self.status_label = QLabel("대기 중")
-        outer.addWidget(self.status_label)
+        self.status_label.setObjectName("statusLabel")
+        self.percent_label = QLabel("0%")
+        self.percent_label.setObjectName("percentLabel")
+        self.percent_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        status_row.addWidget(self.status_label, 1)
+        status_row.addWidget(self.percent_label, 0)
+        action_block.addLayout(status_row)
+
+        outer.addLayout(action_block)
 
         self.setCentralWidget(central)
+
+        self.setFixedWidth(520)
+        self.adjustSize()
+        self.setFixedHeight(self.sizeHint().height())
 
     def _check_ffmpeg(self) -> None:
         try:
@@ -136,7 +207,7 @@ class MainWindow(QMainWindow):
             quality=self.quality_box.currentText(),
             ffmpeg_path=self._ffmpeg_path,
         )
-        self._worker.progress.connect(self.progress.setValue)
+        self._worker.progress.connect(self._on_progress)
         self._worker.status.connect(self.status_label.setText)
         self._worker.finished_ok.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
@@ -144,8 +215,13 @@ class MainWindow(QMainWindow):
         self._worker.finished.connect(self._on_thread_finished)
 
         self.progress.setValue(0)
+        self.percent_label.setText("0%")
         self._set_running(True)
         self._worker.start()
+
+    def _on_progress(self, value: int) -> None:
+        self.progress.setValue(value)
+        self.percent_label.setText(f"{value}%")
 
     def _set_running(self, running: bool) -> None:
         if self._closing:
@@ -161,6 +237,9 @@ class MainWindow(QMainWindow):
 
         self.action_btn.setEnabled(True)
         self.action_btn.setText("취소" if running else "추출")
+        self.action_btn.setProperty("mode", "cancel" if running else "")
+        self.action_btn.style().unpolish(self.action_btn)
+        self.action_btn.style().polish(self.action_btn)
 
     def _on_finished(self, path: str) -> None:
         if self._closing:
@@ -183,6 +262,7 @@ class MainWindow(QMainWindow):
             return
         self._set_running(False)
         self.progress.setValue(0)
+        self.percent_label.setText("0%")
         self.status_label.setText("실패")
         QMessageBox.critical(self, "다운로드 실패", message)
 
@@ -191,6 +271,7 @@ class MainWindow(QMainWindow):
             return
         self._set_running(False)
         self.progress.setValue(0)
+        self.percent_label.setText("0%")
         self.status_label.setText("취소됨")
 
     @staticmethod

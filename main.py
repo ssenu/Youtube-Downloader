@@ -2,13 +2,18 @@
 
 import sys
 
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from app.main_window import MainWindow
+from app.resources import resource_path
+from app.theme import apply_theme
 
 
 def main() -> None:
     app = QApplication(sys.argv)
+    apply_theme(app)
+    app.setWindowIcon(QIcon(resource_path("app.ico")))
     try:
         window = MainWindow()
         window.show()
