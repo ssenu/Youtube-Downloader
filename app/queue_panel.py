@@ -116,6 +116,14 @@ class QueuePanel(QWidget):
         heading.setProperty("role", "field")
         outer.addWidget(heading)
 
+        # 비어 있을 때 안내 문구. 목록 위젯은 항상 남겨 두어야 세로 stretch가
+        # 목록에 남고, 제목이 가운데로 흘러내리지 않는다.
+        self.empty_label = QLabel("추출을 누르면 여기에 쌓입니다")
+        self.empty_label.setObjectName("queueEmpty")
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label.setContentsMargins(0, 24, 0, 0)
+        outer.addWidget(self.empty_label, 0)
+
         self.list_widget = QListWidget()
         self.list_widget.setObjectName("queueList")
         self.list_widget.setSelectionMode(QListWidget.SelectionMode.NoSelection)
@@ -126,11 +134,6 @@ class QueuePanel(QWidget):
         )
         self.list_widget.itemDoubleClicked.connect(self._on_double_click)
         outer.addWidget(self.list_widget, 1)
-
-        self.empty_label = QLabel("추출을 누르면 여기에 쌓입니다")
-        self.empty_label.setObjectName("queueEmpty")
-        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        outer.addWidget(self.empty_label, 0)
 
         self._update_empty()
 
@@ -180,4 +183,3 @@ class QueuePanel(QWidget):
     def _update_empty(self) -> None:
         empty = not self._rows
         self.empty_label.setHidden(not empty)
-        self.list_widget.setHidden(empty)
