@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 
-from PyQt6.QtCore import QStandardPaths, Qt
+from PyQt6.QtCore import QDir, QStandardPaths, Qt
 from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -117,8 +117,10 @@ class MainWindow(QMainWindow):
         dir_row.setContentsMargins(0, 0, 0, 0)
         dir_row.setSpacing(8)
         self.dir_edit = QLineEdit(
-            QStandardPaths.writableLocation(
-                QStandardPaths.StandardLocation.DesktopLocation
+            QDir.toNativeSeparators(
+                QStandardPaths.writableLocation(
+                    QStandardPaths.StandardLocation.DesktopLocation
+                )
             )
         )
         self.browse_btn = QPushButton("변경…")
@@ -180,7 +182,7 @@ class MainWindow(QMainWindow):
             self, "저장 위치 선택", self.dir_edit.text()
         )
         if chosen:
-            self.dir_edit.setText(chosen)
+            self.dir_edit.setText(QDir.toNativeSeparators(chosen))
 
     def _on_action(self) -> None:
         if self._worker is not None and self._worker.isRunning():
