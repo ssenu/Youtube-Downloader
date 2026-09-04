@@ -15,7 +15,7 @@ a = Analysis(
     ["main.py"],
     pathex=[],
     binaries=[(_staged_ffmpeg, ".")],
-    datas=[],
+    datas=[("assets/app.ico", "assets"), ("assets/chevron_down.png", "assets")],
     # yt-dlp는 extractor를 동적으로 import 하므로 정적 분석에 잡히지 않는다.
     hiddenimports=collect_submodules("yt_dlp.extractor"),
     hookspath=[],
@@ -37,4 +37,5 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
+    icon="assets/app.ico",
 )
