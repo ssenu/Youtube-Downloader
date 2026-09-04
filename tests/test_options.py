@@ -135,3 +135,35 @@ def test_build_opts_registers_hooks_only_when_given(tmp_path):
     )
     assert "progress_hooks" not in without
     assert "postprocessor_hooks" not in without
+
+
+def test_build_opts_registers_match_filter_only_when_given(tmp_path):
+    def hook(info, *, incomplete=False):
+        return None
+
+    with_filter = build_ydl_opts(
+        out_dir=str(tmp_path),
+        filename="a",
+        quality="1080p",
+        ffmpeg_path=r"C:\ffmpeg.exe",
+        match_filter=hook,
+    )
+    assert with_filter["match_filter"] is hook
+
+    without = build_ydl_opts(
+        out_dir=str(tmp_path),
+        filename="a",
+        quality="1080p",
+        ffmpeg_path=r"C:\ffmpeg.exe",
+    )
+    assert "match_filter" not in without
+
+
+def test_build_opts_escapes_percent_in_filename(tmp_path):
+    opts = build_ydl_opts(
+        out_dir=str(tmp_path),
+        filename="할인 50% 강의",
+        quality="1080p",
+        ffmpeg_path=r"C:\ffmpeg.exe",
+    )
+    assert opts["outtmpl"] == os.path.join(str(tmp_path), "할인 50%% 강의.%(ext)s")

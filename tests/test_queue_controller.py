@@ -1,56 +1,13 @@
-from PyQt6.QtCore import QObject, pyqtSignal
-
 from app.queue import JobStatus
 from app.queue_controller import QueueController
-
-
-class FakeWorker(QObject):
-    """DownloadWorker와 같은 시그널/메서드만 가진 가짜. 아무것도 다운로드하지 않는다."""
-
-    progress = pyqtSignal(int)
-    status = pyqtSignal(str)
-    title_resolved = pyqtSignal(str)
-    finished_ok = pyqtSignal(str)
-    failed = pyqtSignal(str)
-    cancelled = pyqtSignal()
-    finished = pyqtSignal()
-
-    instances: list["FakeWorker"] = []
-
-    def __init__(self, url, out_dir, filename, quality, ffmpeg_path):
-        super().__init__()
-        self.url = url
-        self.started = False
-        self.cancel_calls = 0
-        FakeWorker.instances.append(self)
-
-    def start(self):
-        self.started = True
-
-    def cancel(self):
-        self.cancel_calls += 1
-
-    def wait(self, *args):
-        return True
-
-    # 테스트 편의: 워커가 끝나는 과정을 흉내낸다
-    def finish_ok(self, path):
-        self.finished_ok.emit(path)
-        self.finished.emit()
-
-    def finish_cancelled(self):
-        self.cancelled.emit()
-        self.finished.emit()
-
-    def finish_failed(self, message):
-        self.failed.emit(message)
-        self.finished.emit()
+from conftest import FakeWorker
 
 
 def make_controller():
     FakeWorker.instances.clear()
     c = QueueController(ffmpeg_path=r"C:\ffmpeg.exe")
     c.worker_factory = FakeWorker
+    c.inter_job_delay_ms = 0
     return c
 
 
@@ -162,14 +119,15 @@ def test_cancel_all_drops_pending_and_cancels_running():
     d = c.enqueue("https://youtu.be/c", r"C:\out", "", "1080p")
     removed = []
     c.job_removed.connect(removed.append)
+    idle_calls = []
+    c.idle.connect(lambda: idle_calls.append(True))
 
     c.cancel_all()
     assert sorted(removed) == [b, d]
     assert FakeWorker.instances[0].cancel_calls == 1
     assert c.is_busy()
+    assert idle_calls == []
 
-    idle_calls = []
-    c.idle.connect(lambda: idle_calls.append(True))
     FakeWorker.instances[0].finish_cancelled()
     assert not c.is_busy()
     assert idle_calls == [True]
@@ -184,3 +142,38 @@ def test_summary_changed_fires_on_enqueue_and_terminal():
     assert summaries[-1] == "대기 0 · 추출 중 1 · 완료 0"
     FakeWorker.instances[0].finish_ok("x")
     assert summaries[-1] == "대기 0 · 추출 중 0 · 완료 1"
+
+
+def test_second_terminal_signal_is_ignored():
+    c = make_controller()
+    a = c.enqueue("https://youtu.be/a", r"C:\out", "", "1080p")
+    w = FakeWorker.instances[0]
+    w.cancelled.emit()
+    w.failed.emit("late")          # 두 번째 종료 시그널 — ValueError 없이 무시돼야 한다
+    assert c.job(a).status is JobStatus.CANCELLED
+    assert c.job(a).error == ""
+
+
+def test_cancel_all_without_worker_emits_idle_immediately():
+    c = make_controller()
+    idle_calls = []
+    c.idle.connect(lambda: idle_calls.append(True))
+    c.cancel_all()
+    assert idle_calls == [True]
+
+
+def test_worker_start_failure_marks_job_failed_and_moves_on():
+    c = make_controller()
+
+    class Exploding(FakeWorker):
+        def start(self):
+            raise RuntimeError("boom")
+
+    c.worker_factory = Exploding
+    a = c.enqueue("https://youtu.be/a", r"C:\out", "", "1080p")
+    assert c.job(a).status is JobStatus.FAILED
+    assert "boom" in c.job(a).error
+    assert not c.is_busy()
+    c.worker_factory = FakeWorker
+    b = c.enqueue("https://youtu.be/b", r"C:\out", "", "1080p")
+    assert c.job(b).status is JobStatus.RUNNING

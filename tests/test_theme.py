@@ -6,7 +6,8 @@ def test_stylesheet_has_accent_color():
 
 
 def test_stylesheet_has_progress_chunk():
-    assert "QProgressBar::chunk" in STYLESHEET
+    assert "QProgressBar#jobBar::chunk" in STYLESHEET
+    assert "QLabel#statusLabel" not in STYLESHEET
 
 
 def test_stylesheet_has_queue_row_styles():
