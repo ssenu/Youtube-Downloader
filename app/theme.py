@@ -61,7 +61,7 @@ QListWidget#queueList::item:selected, QListWidget#queueList::item:hover { backgr
 QLabel#queueEmpty { color: #6B6B70; font-size: 12px; }
 
 QWidget#jobRow { background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 8px; }
-QLabel#jobTitle { color: #1A1A1B; font-size: 13px; }
+#jobTitle { color: #1A1A1B; font-size: 13px; }
 QLabel#jobStatus { color: #6B6B70; font-size: 12px; }
 QLabel#jobStatus[failed="true"] { color: #D03020; }
 QLabel#jobPercent { color: #1A1A1B; font-size: 12px; font-weight: 600; }

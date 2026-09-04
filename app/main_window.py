@@ -30,7 +30,7 @@ from app.resources import resource_path
 from app.validation import validate_out_dir, validate_url
 
 LEFT_WIDTH = 520
-RIGHT_WIDTH = 360
+RIGHT_WIDTH = 300
 GAP = 24
 
 

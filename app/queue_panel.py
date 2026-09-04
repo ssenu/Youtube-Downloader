@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QPainter, QPalette
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -10,11 +11,117 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from app.queue import Job, JobStatus
+
+
+class MarqueeLabel(QWidget):
+    """한 줄 텍스트 라벨. 폭보다 길면 자르지 않고 좌우로 천천히 왕복 스크롤한다.
+
+    짧은 텍스트는 그냥 그린다. 긴 텍스트는 왼쪽으로 1px씩 흘러가다 끝에 닿으면
+    잠시 멈춘 뒤 오른쪽으로 되돌아온다. 사용자가 전체 제목을 읽을 수 있게 하는 것이
+    목적이므로 속도는 느리게 둔다.
+    """
+
+    STEP_PX = 1
+    INTERVAL_MS = 30
+    PAUSE_TICKS = 40  # 양 끝에서 약 1.2초 정지
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._text = ""
+        self._offset = 0
+        self._direction = -1
+        self._pause = 0
+        self._timer = QTimer(self)
+        self._timer.setInterval(self.INTERVAL_MS)
+        self._timer.timeout.connect(self._tick)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumWidth(40)
+
+    # --- 공개 API (QLabel과 같은 이름) ---
+
+    def setText(self, text: str) -> None:
+        self._text = text or ""
+        self._offset = 0
+        self._direction = -1
+        self._pause = self.PAUSE_TICKS
+        self._update_scrolling()
+        self.update()
+
+    def text(self) -> str:
+        return self._text
+
+    def sizeHint(self) -> QSize:
+        return QSize(120, self.fontMetrics().height())
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(40, self.fontMetrics().height())
+
+    # --- 스크롤 상태 ---
+
+    def _overflow(self) -> int:
+        return max(0, self.fontMetrics().horizontalAdvance(self._text) - self.width())
+
+    def _update_scrolling(self) -> None:
+        if self._overflow() > 0 and self.isVisible():
+            if not self._timer.isActive():
+                self._timer.start()
+        else:
+            self._timer.stop()
+            self._offset = 0
+
+    def _tick(self) -> None:
+        if self._pause > 0:
+            self._pause -= 1
+            return
+        over = self._overflow()
+        if over <= 0:
+            self._timer.stop()
+            self._offset = 0
+            self.update()
+            return
+        self._offset += self._direction * self.STEP_PX
+        if self._offset <= -over:
+            self._offset = -over
+            self._direction = 1
+            self._pause = self.PAUSE_TICKS
+        elif self._offset >= 0:
+            self._offset = 0
+            self._direction = -1
+            self._pause = self.PAUSE_TICKS
+        self.update()
+
+    # --- Qt 이벤트 ---
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._offset = 0
+        self._direction = -1
+        self._pause = self.PAUSE_TICKS
+        self._update_scrolling()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._update_scrolling()
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        self._timer.stop()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setClipRect(self.rect())
+        painter.setFont(self.font())
+        painter.setPen(self.palette().color(QPalette.ColorRole.WindowText))
+        metrics = self.fontMetrics()
+        baseline = (self.height() + metrics.ascent() - metrics.descent()) // 2
+        painter.drawText(self._offset, baseline, self._text)
+        painter.end()
 
 
 class JobRow(QWidget):
@@ -34,7 +141,7 @@ class JobRow(QWidget):
         top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(8)
-        self.title_label = QLabel()
+        self.title_label = MarqueeLabel()
         self.title_label.setObjectName("jobTitle")
         self.status_label = QLabel()
         self.status_label.setObjectName("jobStatus")
@@ -69,7 +176,8 @@ class JobRow(QWidget):
 
     def refresh(self, job: Job) -> None:
         self._full_title = job.display_title
-        self._elide_title()
+        self.title_label.setText(self._full_title)
+        self.title_label.setToolTip(self._full_title)
 
         self.status_label.setText(job.status.value)
         failed = job.status is JobStatus.FAILED
@@ -87,17 +195,6 @@ class JobRow(QWidget):
         # 끝난 행의 ×는 '제거', 나머지는 '취소'
         self.cancel_btn.setToolTip("목록에서 제거" if job.is_finished else "취소")
 
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._elide_title()
-
-    def _elide_title(self) -> None:
-        width = max(self.title_label.width(), 120)
-        metrics = self.title_label.fontMetrics()
-        self.title_label.setText(
-            metrics.elidedText(self._full_title, Qt.TextElideMode.ElideRight, width)
-        )
-        self.title_label.setToolTip(self._full_title)
 
 
 class QueuePanel(QWidget):
@@ -128,7 +225,7 @@ class QueuePanel(QWidget):
         self.list_widget.setObjectName("queueList")
         self.list_widget.setSelectionMode(QListWidget.SelectionMode.NoSelection)
         self.list_widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.list_widget.setSpacing(4)
+        self.list_widget.setSpacing(6)
         self.list_widget.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )

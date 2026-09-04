@@ -1,5 +1,5 @@
 from app.queue import DownloadQueue, JobStatus
-from app.queue_panel import JobRow, QueuePanel
+from app.queue_panel import JobRow, MarqueeLabel, QueuePanel
 
 
 def make_job(filename="", url="https://youtu.be/abc"):
@@ -89,3 +89,48 @@ def test_panel_forwards_cancel(qapp):
     panel.cancel_requested.connect(got.append)
     panel.row(a.id).cancel_btn.click()
     assert got == [a.id]
+
+
+def test_marquee_short_text_does_not_scroll(qapp):
+    label = MarqueeLabel()
+    label.resize(300, 20)
+    label.show()
+    label.setText("짧은 제목")
+    assert label.text() == "짧은 제목"
+    assert label._overflow() == 0
+    assert label._timer.isActive() is False
+    assert label._offset == 0
+
+
+def test_marquee_long_text_scrolls_left_then_back(qapp):
+    label = MarqueeLabel()
+    label.resize(80, 20)
+    label.show()
+    label.setText("1234567890 아주 긴 제목이라서 한 줄에 다 들어가지 않는다 1234567890")
+    over = label._overflow()
+    assert over > 0
+    assert label._timer.isActive() is True
+
+    for _ in range(MarqueeLabel.PAUSE_TICKS):  # 시작 정지 구간
+        label._tick()
+    assert label._offset == 0
+    for _ in range(10):
+        label._tick()
+    assert label._offset == -10  # 왼쪽으로 흘러감
+
+    for _ in range(over + 5):  # 끝까지 갔다가
+        label._tick()
+    assert label._offset == -over and label._direction == 1
+    while label._pause > 0:  # 끝에서 정지
+        label._tick()
+    assert label._offset == -over
+    for _ in range(3):  # 오른쪽으로 되돌아옴
+        label._tick()
+    assert label._offset == -over + 3
+
+
+def test_row_title_keeps_full_text_and_tooltip(qapp):
+    q, job = make_job(filename="아주 긴 파일 이름 " * 8)
+    row = JobRow(job)
+    assert row.title_label.text() == job.display_title
+    assert row.title_label.toolTip() == job.display_title

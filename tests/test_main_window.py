@@ -21,7 +21,7 @@ def window(qapp, monkeypatch):
 
 
 def test_initial_state(window):
-    assert window.width() == 904
+    assert window.width() == 844
     assert window.action_btn.text() == "추출" and window.action_btn.isEnabled()
     assert window.byline_label.text() == "by ssenu"
     assert window.summary_label.text() == "대기 0 · 추출 중 0 · 완료 0"
