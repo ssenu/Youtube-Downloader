@@ -1,10 +1,7 @@
-import os
-
 import pytest
 from PyQt6.QtWidgets import QMessageBox
 
 from app.main_window import MainWindow
-from app.queue import JobStatus
 from conftest import FakeWorker
 
 
