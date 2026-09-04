@@ -53,12 +53,30 @@ QPushButton#actionBtn {
 QPushButton#actionBtn:hover { background: #C42C1D; }
 QPushButton#actionBtn:pressed { background: #B0281A; }
 QPushButton#actionBtn:disabled { background: #E8A39B; color: #FFFFFF; }
-QPushButton#actionBtn[mode="cancel"] { background: #FFFFFF; color: #D03020; border: 1.5px solid #D03020; }
-QPushButton#actionBtn[mode="cancel"]:hover { background: #FBE9E6; }
-QPushButton#actionBtn[mode="cancel"]:disabled { color: #E8A39B; border-color: #E8A39B; background: #FFFFFF; }
-
 QProgressBar { background: #E4E4E7; border: none; border-radius: 2px; min-height: 4px; max-height: 4px; }
 QProgressBar::chunk { background: #D03020; border-radius: 2px; }
+
+QLabel#byline { color: #6B6B70; font-size: 12px; }
+QLabel#summaryLabel { color: #6B6B70; font-size: 12px; }
+
+QListWidget#queueList { background: transparent; border: none; outline: 0; }
+QListWidget#queueList::item { border: none; padding: 0; }
+QListWidget#queueList::item:selected, QListWidget#queueList::item:hover { background: transparent; }
+QLabel#queueEmpty { color: #6B6B70; font-size: 12px; }
+
+QWidget#jobRow { background: #FFFFFF; border: 1px solid #E4E4E7; border-radius: 8px; }
+QLabel#jobTitle { color: #1A1A1B; font-size: 13px; }
+QLabel#jobStatus { color: #6B6B70; font-size: 12px; }
+QLabel#jobStatus[failed="true"] { color: #D03020; }
+QLabel#jobPercent { color: #1A1A1B; font-size: 12px; font-weight: 600; }
+QPushButton#jobCancel {
+    background: transparent; color: #9A9AA0; border: none;
+    min-width: 24px; max-width: 24px; min-height: 24px; max-height: 24px;
+    font-size: 16px; padding: 0;
+}
+QPushButton#jobCancel:hover { color: #D03020; }
+QProgressBar#jobBar { background: #E4E4E7; border: none; border-radius: 2px; min-height: 4px; max-height: 4px; }
+QProgressBar#jobBar::chunk { background: #D03020; border-radius: 2px; }
 """
 
 
