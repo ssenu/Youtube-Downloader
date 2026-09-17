@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.ffmpeg_locator import FFmpegNotFoundError, locate_ffmpeg
-from app.options import DEFAULT_QUALITY, QUALITY_FORMATS
+from app.options import AUDIO_BITRATES, DEFAULT_QUALITY, QUALITY_FORMATS
 from app.queue import JobStatus
 from app.queue_controller import QueueController
 from app.queue_panel import QueuePanel
@@ -123,7 +123,10 @@ class MainWindow(QMainWindow):
         quality_group.addWidget(_field_label("화질"))
         self.quality_box = QComboBox()
         self.quality_box.addItems(list(QUALITY_FORMATS))
+        self.quality_box.insertSeparator(self.quality_box.count())
+        self.quality_box.addItems(list(AUDIO_BITRATES))
         self.quality_box.setCurrentText(DEFAULT_QUALITY)
+        # 실제 폰트에서 'MP3 320kbps'는 78px, 글자 영역은 132-12-28-2=90px이라 잘리지 않는다.
         self.quality_box.setFixedWidth(132)
         quality_group.addWidget(self.quality_box)
 

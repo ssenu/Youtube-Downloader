@@ -1,4 +1,5 @@
 import pytest
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMessageBox
 
 from app.main_window import MainWindow
@@ -75,3 +76,31 @@ def test_close_while_busy_waits_for_worker(window, tmp_path):
     worker.finish_cancelled()
     assert not window.isVisible()
     assert window._controller.is_busy() is False
+
+
+def test_quality_box_lists_video_then_separator_then_mp3(window):
+    box = window.quality_box
+    assert [box.itemText(i) for i in range(box.count())] == [
+        "최고화질",
+        "1080p",
+        "720p",
+        "480p",
+        "",
+        "MP3 320kbps",
+        "MP3 192kbps",
+        "MP3 128kbps",
+    ]
+    separator = box.model().item(4)
+    assert not (separator.flags() & Qt.ItemFlag.ItemIsSelectable)
+    assert box.currentText() == "1080p"
+    assert box.width() == 132
+
+
+def test_enqueue_passes_mp3_quality_to_job(window, tmp_path):
+    window.dir_edit.setText(str(tmp_path))
+    window.url_edit.setText("https://www.youtube.com/watch?v=aaaaaaaaaaa")
+    window.quality_box.setCurrentText("MP3 128kbps")
+    window._enqueue()
+
+    assert window._controller.job(1).quality == "MP3 128kbps"
+    assert window.quality_box.currentText() == "MP3 128kbps", "화질 선택은 추가 후에도 유지된다"
