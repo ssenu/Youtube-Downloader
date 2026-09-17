@@ -3,11 +3,14 @@ import os
 import pytest
 
 from app.options import (
+    AUDIO_BITRATES,
+    AUDIO_FORMAT,
     DEFAULT_QUALITY,
     QUALITY_FORMATS,
     TITLE_TEMPLATE,
     build_format_string,
     build_ydl_opts,
+    is_audio_quality,
     resolve_collision,
     sanitize_filename,
 )
@@ -167,3 +170,61 @@ def test_build_opts_escapes_percent_in_filename(tmp_path):
         ffmpeg_path=r"C:\ffmpeg.exe",
     )
     assert opts["outtmpl"] == os.path.join(str(tmp_path), "할인 50%% 강의.%(ext)s")
+
+
+def test_audio_bitrates_are_exactly_three_in_order():
+    assert list(AUDIO_BITRATES) == ["MP3 320kbps", "MP3 192kbps", "MP3 128kbps"]
+    assert list(AUDIO_BITRATES.values()) == ["320", "192", "128"]
+
+
+def test_is_audio_quality_distinguishes_mp3_from_video():
+    for quality in AUDIO_BITRATES:
+        assert is_audio_quality(quality) is True, quality
+    for quality in QUALITY_FORMATS:
+        assert is_audio_quality(quality) is False, quality
+    assert is_audio_quality("MP3") is False
+    assert is_audio_quality("") is False
+
+
+def test_build_format_string_for_mp3_prefers_audio_only_stream():
+    assert AUDIO_FORMAT == "ba/b"
+    for quality in AUDIO_BITRATES:
+        assert build_format_string(quality) == "ba/b"
+
+
+@pytest.mark.parametrize(
+    "quality, bitrate",
+    [("MP3 320kbps", "320"), ("MP3 192kbps", "192"), ("MP3 128kbps", "128")],
+)
+def test_build_opts_for_mp3_extracts_audio_and_writes_tags(tmp_path, quality, bitrate):
+    opts = build_ydl_opts(
+        out_dir=str(tmp_path),
+        filename="강의",
+        quality=quality,
+        ffmpeg_path=r"C:\ffmpeg.exe",
+    )
+    assert opts["format"] == "ba/b"
+    assert "merge_output_format" not in opts
+    assert opts["postprocessors"] == [
+        {
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": bitrate,
+        },
+        {"key": "FFmpegMetadata", "add_metadata": True, "add_chapters": False},
+    ]
+    assert opts["outtmpl"] == os.path.join(str(tmp_path), "강의.%(ext)s")
+    assert opts["ffmpeg_location"] == r"C:\ffmpeg.exe"
+    assert opts["noplaylist"] is True
+
+
+def test_build_opts_for_video_has_no_postprocessors(tmp_path):
+    opts = build_ydl_opts(
+        out_dir=str(tmp_path),
+        filename="강의",
+        quality="1080p",
+        ffmpeg_path=r"C:\ffmpeg.exe",
+    )
+    assert "postprocessors" not in opts
+    assert opts["merge_output_format"] == "mp4"
+    assert opts["format"] == QUALITY_FORMATS["1080p"]

@@ -25,6 +25,17 @@ QUALITY_FORMATS: dict[str, str] = {
 }
 
 DEFAULT_QUALITY = "1080p"
+
+# MP3 항목. 값은 ffmpeg에 넘길 고정 비트레이트(kbps).
+# YouTube 원본 음성은 대개 130~160kbps라 320kbps가 음질을 더 올려주지는 않는다.
+AUDIO_BITRATES: dict[str, str] = {
+    "MP3 320kbps": "320",
+    "MP3 192kbps": "192",
+    "MP3 128kbps": "128",
+}
+# 음성 전용 스트림을 우선 받고, 없으면 합본을 받아 음성만 뽑는다.
+AUDIO_FORMAT = "ba/b"
+
 TITLE_TEMPLATE = "%(title)s.%(ext)s"
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
@@ -41,8 +52,15 @@ def sanitize_filename(name: str) -> str:
     return cleaned.strip().strip(".").strip()
 
 
+def is_audio_quality(quality: str) -> bool:
+    """드롭다운 값이 MP3 항목인지 판정한다."""
+    return quality in AUDIO_BITRATES
+
+
 def build_format_string(quality: str) -> str:
     """화질 드롭다운 값을 yt-dlp format 문자열로 바꾼다."""
+    if is_audio_quality(quality):
+        return AUDIO_FORMAT
     try:
         return QUALITY_FORMATS[quality]
     except KeyError:
@@ -93,13 +111,26 @@ def build_ydl_opts(
     opts: dict = {
         "format": build_format_string(quality),
         "outtmpl": outtmpl,
-        "merge_output_format": "mp4",
         "ffmpeg_location": ffmpeg_path,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
     }
+
+    if is_audio_quality(quality):
+        # 받은 음성을 MP3로 바꾼 뒤 제목·아티스트(채널)·날짜 태그를 넣는다.
+        # 챕터는 MP3 플레이어 대부분이 쓰지 않으므로 넣지 않는다.
+        opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": AUDIO_BITRATES[quality],
+            },
+            {"key": "FFmpegMetadata", "add_metadata": True, "add_chapters": False},
+        ]
+    else:
+        opts["merge_output_format"] = "mp4"
 
     if progress_hook is not None:
         opts["progress_hooks"] = [progress_hook]
