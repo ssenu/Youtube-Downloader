@@ -10,7 +10,7 @@ import time
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from app.errors import friendly_error
-from app.options import build_ydl_opts
+from app.options import build_ydl_opts, is_audio_quality
 
 
 class CancelledError(Exception):
@@ -81,6 +81,7 @@ class DownloadWorker(QThread):
         self._out_dir = out_dir
         self._filename = filename
         self._quality = quality
+        self._audio = is_audio_quality(quality)
         self._ffmpeg_path = ffmpeg_path
         self._cancelled = False
         self._seen_paths: list[str] = []
@@ -128,7 +129,9 @@ class DownloadWorker(QThread):
             if total:
                 self.progress.emit(min(100, int(done * 100 / total)))
             self.status.emit(
-                "영상 다운로드 중…" if self._stream_index == 0 else "음성 다운로드 중…"
+                "영상 다운로드 중…"
+                if self._stream_index == 0 and not self._audio
+                else "음성 다운로드 중…"
             )
 
         elif state == "finished":
@@ -145,16 +148,21 @@ class DownloadWorker(QThread):
         return None
 
     def _on_postprocessor(self, d: dict) -> None:
-        if self._cancelled:
-            raise CancelledError()
-
-        if d.get("status") == "started":
-            self.status.emit("병합 중…")
-
+        # 경로 기록을 취소 확인보다 먼저 한다. 변환 직후 취소돼도 결과 파일을 정리해야 한다.
         info = d.get("info_dict") or {}
         path = info.get("filepath")
         if path:
             self._seen_paths.append(path)
+            if self._audio and d.get("postprocessor") == "ExtractAudio":
+                # yt-dlp는 ExtractAudio의 finished 훅에도 변환 전 경로(.webm 등)를 넘긴다.
+                # 변환 결과 .mp3 경로는 다음 후처리기에서야 보이므로 여기서 미리 기록한다.
+                self._seen_paths.append(os.path.splitext(path)[0] + ".mp3")
+
+        if self._cancelled:
+            raise CancelledError()
+
+        if d.get("status") == "started":
+            self.status.emit("MP3 변환 중…" if self._audio else "병합 중…")
 
     def run(self) -> None:
         outcome: str | None = None

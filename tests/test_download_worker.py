@@ -1,6 +1,13 @@
 import os
 
-from app.download_worker import DownloadWorker, cleanup_partials, pick_final_path
+import pytest
+
+from app.download_worker import (
+    CancelledError,
+    DownloadWorker,
+    cleanup_partials,
+    pick_final_path,
+)
 
 
 def test_pick_final_path_returns_last_existing(tmp_path):
@@ -204,3 +211,122 @@ def test_probe_title_returns_empty_and_does_not_emit_without_title(monkeypatch):
 
     assert worker._probe_title() == ""
     assert got == []
+
+
+def _make_worker(quality: str, out_dir: str = "C:\\tmp") -> DownloadWorker:
+    return DownloadWorker(
+        url="https://example.com/v",
+        out_dir=out_dir,
+        filename="강의",
+        quality=quality,
+        ffmpeg_path="C:\\ffmpeg.exe",
+    )
+
+
+def _pp_event(status: str, postprocessor: str, path: str) -> dict:
+    return {
+        "status": status,
+        "postprocessor": postprocessor,
+        "info_dict": {"filepath": path},
+    }
+
+
+def test_audio_mode_download_status_is_audio_only():
+    worker = _make_worker("MP3 192kbps")
+    got: list[str] = []
+    worker.status.connect(got.append)
+
+    worker._on_progress(
+        {
+            "status": "downloading",
+            "filename": "C:\\tmp\\강의.webm",
+            "downloaded_bytes": 10,
+            "total_bytes": 100,
+        }
+    )
+
+    assert got == ["음성 다운로드 중…"]
+
+
+def test_video_mode_first_stream_status_is_unchanged():
+    worker = _make_worker("1080p")
+    got: list[str] = []
+    worker.status.connect(got.append)
+
+    worker._on_progress(
+        {
+            "status": "downloading",
+            "filename": "C:\\tmp\\강의.f137.mp4",
+            "downloaded_bytes": 10,
+            "total_bytes": 100,
+        }
+    )
+
+    assert got == ["영상 다운로드 중…"]
+
+
+@pytest.mark.parametrize(
+    "quality, postprocessor, expected",
+    [
+        ("MP3 192kbps", "ExtractAudio", "MP3 변환 중…"),
+        ("MP3 192kbps", "Metadata", "MP3 변환 중…"),
+        ("1080p", "Merger", "병합 중…"),
+    ],
+)
+def test_postprocessor_status_depends_on_mode(quality, postprocessor, expected):
+    worker = _make_worker(quality)
+    got: list[str] = []
+    worker.status.connect(got.append)
+
+    worker._on_postprocessor(_pp_event("started", postprocessor, "C:\\tmp\\강의.webm"))
+
+    assert got == [expected]
+
+
+def test_cancel_right_after_audio_conversion_records_mp3_for_cleanup():
+    """ExtractAudio finished 훅은 .webm 경로만 준다. .mp3도 정리 대상에 들어가야 한다."""
+    worker = _make_worker("MP3 192kbps")
+    worker.cancel()
+
+    with pytest.raises(CancelledError):
+        worker._on_postprocessor(
+            _pp_event("finished", "ExtractAudio", "C:\\tmp\\강의.webm")
+        )
+
+    assert "C:\\tmp\\강의.webm" in worker._seen_paths
+    assert "C:\\tmp\\강의.mp3" in worker._seen_paths
+
+
+def test_cancel_at_merge_still_records_merged_path():
+    worker = _make_worker("1080p")
+    worker.cancel()
+
+    with pytest.raises(CancelledError):
+        worker._on_postprocessor(_pp_event("finished", "Merger", "C:\\tmp\\강의.mp4"))
+
+    assert worker._seen_paths == ["C:\\tmp\\강의.mp4"]
+
+
+def test_video_mode_does_not_guess_mp3_path():
+    worker = _make_worker("1080p")
+
+    worker._on_postprocessor(_pp_event("started", "ExtractAudio", "C:\\tmp\\강의.webm"))
+
+    assert worker._seen_paths == ["C:\\tmp\\강의.webm"]
+
+
+def test_audio_hook_sequence_leads_pick_final_path_to_mp3(tmp_path):
+    webm = str(tmp_path / "강의.webm")  # 변환 후 yt-dlp가 지운 상태
+    mp3 = tmp_path / "강의.mp3"
+    mp3.write_bytes(b"")
+    worker = _make_worker("MP3 192kbps", out_dir=str(tmp_path))
+
+    for status, postprocessor, path in [
+        ("started", "ExtractAudio", webm),
+        ("finished", "ExtractAudio", webm),
+        ("started", "Metadata", str(mp3)),
+        ("finished", "Metadata", str(mp3)),
+    ]:
+        worker._on_postprocessor(_pp_event(status, postprocessor, path))
+
+    assert pick_final_path(worker._seen_paths) == str(mp3)
